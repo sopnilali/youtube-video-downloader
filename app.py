@@ -4,9 +4,11 @@ import re
 import json
 import subprocess
 import shutil
+import uuid
+import threading
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
-from flask import Flask, render_template, request, jsonify, send_file, Response
+from flask import Flask, render_template, request, jsonify, send_file, Response, stream_with_context
 
 app = Flask(__name__)
 
@@ -22,6 +24,9 @@ if not YT_DLP_CMD:
     YT_DLP_ARGS = ['-m', 'yt_dlp']
 else:
     YT_DLP_ARGS = []
+
+# Progress tracking
+download_tasks = {}
 
 def clean_filename(title):
     """Clean filename for saving."""
@@ -124,7 +129,7 @@ def get_info():
 
 @app.route('/download', methods=['POST'])
 def download():
-    """Stream download directly to browser without storing."""
+    """Start download and return task ID for progress tracking."""
     data = request.get_json()
     url = data.get('url', '').strip()
     quality = data.get('quality', '')
@@ -160,24 +165,27 @@ def download():
         title = clean_filename(info.get('title', 'video'))
         video_id = info.get('id', 'unknown')
         
-        # Determine format spec and output
+        # Create task
+        task_id = str(uuid.uuid4())[:8]
+        
         if is_audio:
             filename = f"{title}_{video_id}.mp3"
             format_spec = 'best'
             audio_quality = quality
-            output_template = f"/tmp/{video_id}.%(ext)s"
         else:
             filename = f"{title}_{video_id}.mp4"
             height = quality.replace('p', '')
             format_spec = f"bestvideo[height<={height}]+bestaudio/best[height<={height}]"
             audio_quality = None
-            output_template = f"/tmp/{video_id}.%(ext)s"
+        
+        output_template = f"/tmp/{task_id}.%(ext)s"
         
         # Build download command
         cmd = [
             YT_DLP_CMD, *YT_DLP_ARGS,
             '-f', format_spec,
             '-o', output_template,
+            '--newline',
             '--no-playlist',
             '--no-warnings',
             '--extractor-args', 'youtube:player_client=android',
@@ -197,69 +205,149 @@ def download():
         
         cmd.append(url)
         
-        # Execute download
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        # Initialize task
+        download_tasks[task_id] = {
+            'progress': 0,
+            'status': 'downloading',
+            'filename': filename,
+            'title': info.get('title'),
+            'is_audio': is_audio,
+            'error': None,
+            'file_path': None
+        }
         
-        if result.returncode != 0:
-            stderr = result.stderr.strip()
-            stderr_lines = [line for line in stderr.split('\n') if 'Deprecated' not in line and 'deprecated' not in line]
-            clean_error = '\n'.join(stderr_lines)
-            
-            if '403' in clean_error or 'Forbidden' in clean_error:
-                return jsonify({'error': 'Download blocked (403). Try updating yt-dlp: pip install --upgrade yt-dlp'}), 500
-            
-            return jsonify({'error': f'Download failed: {clean_error}'}), 500
-        
-        # Find the downloaded file
-        if is_audio:
-            downloaded_file = Path(f"/tmp/{video_id}.mp3")
-            if not downloaded_file.exists():
-                for ext in ['m4a', 'webm', 'opus']:
-                    alt = Path(f"/tmp/{video_id}.{ext}")
-                    if alt.exists():
-                        downloaded_file = alt
-                        break
-        else:
-            downloaded_file = Path(f"/tmp/{video_id}.mp4")
-            if not downloaded_file.exists():
-                for ext in ['webm', 'mkv']:
-                    alt = Path(f"/tmp/{video_id}.{ext}")
-                    if alt.exists():
-                        downloaded_file = alt
-                        break
-        
-        if not downloaded_file.exists():
-            return jsonify({'error': 'Download completed but file not found'}), 500
-        
-        # Stream file to browser and delete after
-        def generate():
-            with open(downloaded_file, 'rb') as f:
-                while True:
-                    chunk = f.read(8192)
-                    if not chunk:
-                        break
-                    yield chunk
-            # Clean up temp file after sending
+        # Start download in background thread
+        def run_download():
+            task = download_tasks[task_id]
             try:
-                downloaded_file.unlink()
-            except:
-                pass
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True
+                )
+                
+                for line in process.stdout:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    # Parse progress percentage
+                    if '[download]' in line:
+                        match = re.search(r'(\d+(?:\.\d+)?)%', line)
+                        if match:
+                            task['progress'] = float(match.group(1))
+                    
+                    # Check for errors
+                    if 'ERROR' in line:
+                        task['status'] = 'error'
+                        task['error'] = line
+                        break
+                
+                process.wait()
+                
+                if task['status'] != 'error':
+                    # Find the downloaded file
+                    if is_audio:
+                        downloaded_file = Path(f"/tmp/{task_id}.mp3")
+                        if not downloaded_file.exists():
+                            for ext in ['m4a', 'webm', 'opus']:
+                                alt = Path(f"/tmp/{task_id}.{ext}")
+                                if alt.exists():
+                                    downloaded_file = alt
+                                    break
+                    else:
+                        downloaded_file = Path(f"/tmp/{task_id}.mp4")
+                        if not downloaded_file.exists():
+                            for ext in ['webm', 'mkv']:
+                                alt = Path(f"/tmp/{task_id}.{ext}")
+                                if alt.exists():
+                                    downloaded_file = alt
+                                    break
+                    
+                    if downloaded_file.exists():
+                        task['file_path'] = str(downloaded_file)
+                        task['progress'] = 100
+                        task['status'] = 'complete'
+                    else:
+                        task['status'] = 'error'
+                        task['error'] = 'File not found after download'
+                        
+            except Exception as e:
+                task['status'] = 'error'
+                task['error'] = str(e)
         
-        content_type = 'audio/mpeg' if is_audio else 'video/mp4'
+        thread = threading.Thread(target=run_download)
+        thread.start()
         
-        return Response(
-            generate(),
-            mimetype=content_type,
-            headers={
-                'Content-Disposition': f'attachment; filename="{filename}"',
-                'Content-Length': str(downloaded_file.stat().st_size)
-            }
-        )
+        return jsonify({
+            'success': True,
+            'task_id': task_id,
+            'filename': filename,
+            'title': info.get('title')
+        })
         
     except subprocess.TimeoutExpired:
-        return jsonify({'error': 'Download timed out. The video may be too large.'}), 504
+        return jsonify({'error': 'Request timed out. Try again.'}), 504
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/progress/<task_id>')
+def progress(task_id):
+    """Stream download progress via SSE."""
+    def generate():
+        while True:
+            task = download_tasks.get(task_id)
+            if not task:
+                yield f"data: {json.dumps({'error': 'Task not found'})}\n\n"
+                return
+            
+            yield f"data: {json.dumps({'progress': task['progress'], 'status': task['status']})}\n\n"
+            
+            if task['status'] in ('complete', 'error'):
+                return
+            
+            import time
+            time.sleep(0.3)
+    
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
+@app.route('/file/<task_id>')
+def serve_file(task_id):
+    """Serve downloaded file and clean up."""
+    task = download_tasks.get(task_id)
+    if not task or not task.get('file_path'):
+        return jsonify({'error': 'File not ready'}), 404
+    
+    file_path = Path(task['file_path'])
+    if not file_path.exists():
+        return jsonify({'error': 'File not found'}), 404
+    
+    filename = task['filename']
+    content_type = 'audio/mpeg' if task['is_audio'] else 'video/mp4'
+    
+    def generate():
+        with open(file_path, 'rb') as f:
+            while True:
+                chunk = f.read(8192)
+                if not chunk:
+                    break
+                yield chunk
+        # Clean up temp file
+        try:
+            file_path.unlink()
+            download_tasks.pop(task_id, None)
+        except:
+            pass
+    
+    return Response(
+        stream_with_context(generate()),
+        mimetype=content_type,
+        headers={
+            'Content-Disposition': f'attachment; filename="{filename}"',
+            'Content-Length': str(file_path.stat().st_size)
+        }
+    )
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

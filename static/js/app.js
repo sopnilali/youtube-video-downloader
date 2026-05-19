@@ -233,6 +233,7 @@ class YouTubeDownloader {
         this.videoSection.classList.add('hidden');
         this.downloadProgress.classList.remove('hidden');
         this.downloadFiles.innerHTML = '';
+        this.updateProgressBar(0);
 
         const downloads = [];
 
@@ -241,8 +242,8 @@ class YouTubeDownloader {
             if (this.downloadType === 'video' || this.downloadType === 'both') {
                 if (!this.selectedVideoQuality) throw new Error('No video quality selected');
                 
-                this.progressStatus.textContent = 'Downloading video...';
-                const videoResult = await this.downloadFile({
+                this.progressStatus.innerHTML = '<i class="fa-solid fa-video"></i> Downloading video...';
+                const videoResult = await this.downloadWithProgress({
                     url: this.currentVideo.url,
                     quality: this.selectedVideoQuality.quality,
                     is_audio: false
@@ -254,8 +255,9 @@ class YouTubeDownloader {
             if (this.downloadType === 'audio' || this.downloadType === 'both') {
                 if (!this.selectedAudioQuality) throw new Error('No audio quality selected');
                 
-                this.progressStatus.textContent = 'Downloading audio...';
-                const audioResult = await this.downloadFile({
+                this.progressStatus.innerHTML = '<i class="fa-solid fa-music"></i> Downloading audio...';
+                this.updateProgressBar(0);
+                const audioResult = await this.downloadWithProgress({
                     url: this.currentVideo.url,
                     quality: this.selectedAudioQuality.quality,
                     is_audio: true
@@ -292,38 +294,65 @@ class YouTubeDownloader {
         }
     }
 
-    async downloadFile(payload) {
-        const response = await fetch('/download', {
+    async downloadWithProgress(payload) {
+        // Start download
+        const startResponse = await fetch('/download', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
 
-        if (!response.ok) {
-            const data = await response.json();
-            throw new Error(data.error || 'Download failed');
+        const startData = await startResponse.json();
+
+        if (!startData.success) {
+            throw new Error(startData.error || 'Download failed');
         }
 
-        // Get filename from content-disposition header
-        const disposition = response.headers.get('Content-Disposition');
-        const filename = disposition 
-            ? disposition.split('filename="')[1]?.replace('"', '') 
-            : 'download';
+        const taskId = startData.task_id;
 
-        // Create blob and trigger download
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
+        // Wait for progress via SSE
+        return new Promise((resolve, reject) => {
+            const eventSource = new EventSource(`/progress/${taskId}`);
+
+            eventSource.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+
+                if (data.error) {
+                    eventSource.close();
+                    reject(new Error(data.error));
+                    return;
+                }
+
+                this.updateProgressBar(data.progress);
+
+                if (data.status === 'complete') {
+                    eventSource.close();
+                    resolve({
+                        success: true,
+                        filename: startData.filename,
+                        url: `/file/${taskId}`
+                    });
+                } else if (data.status === 'error') {
+                    eventSource.close();
+                    reject(new Error('Download failed'));
+                }
+            };
+
+            eventSource.onerror = () => {
+                eventSource.close();
+                reject(new Error('Connection lost'));
+            };
+        });
+    }
+
+    updateProgressBar(percent) {
+        const fill = this.downloadProgress.querySelector('.progress-fill');
+        const text = this.downloadProgress.querySelector('.progress-text');
         
-        // Auto-trigger download
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-        return { filename, url, success: true };
+        fill.style.width = `${percent}%`;
+        fill.style.marginLeft = '0';
+        fill.style.animation = 'none';
+        text.textContent = `${Math.round(percent)}% complete`;
     }
 
     addToHistory(item) {
