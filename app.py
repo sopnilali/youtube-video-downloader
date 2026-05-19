@@ -8,7 +8,7 @@ import uuid
 import threading
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
-from flask import Flask, render_template, request, jsonify, send_file, Response, stream_with_context
+from flask import Flask, render_template, request, jsonify, send_file, Response
 
 app = Flask(__name__)
 
@@ -27,6 +27,23 @@ else:
 
 # Progress tracking
 download_tasks = {}
+
+def cleanup_old_files():
+    """Remove temp files older than 10 minutes."""
+    import time
+    now = time.time()
+    for f in Path('/tmp').glob('*.mp4'):
+        if now - f.stat().st_mtime > 600:
+            try:
+                f.unlink()
+            except:
+                pass
+    for f in Path('/tmp').glob('*.mp3'):
+        if now - f.stat().st_mtime > 600:
+            try:
+                f.unlink()
+            except:
+                pass
 
 def clean_filename(title):
     """Clean filename for saving."""
@@ -137,6 +154,9 @@ def download():
     
     if not url or not quality:
         return jsonify({'error': 'Missing URL or quality'}), 400
+    
+    # Cleanup old temp files
+    cleanup_old_files()
     
     try:
         # Get video info first for filename
@@ -294,27 +314,20 @@ def download():
 
 @app.route('/progress/<task_id>')
 def progress(task_id):
-    """Stream download progress via SSE."""
-    def generate():
-        while True:
-            task = download_tasks.get(task_id)
-            if not task:
-                yield f"data: {json.dumps({'error': 'Task not found'})}\n\n"
-                return
-            
-            yield f"data: {json.dumps({'progress': task['progress'], 'status': task['status']})}\n\n"
-            
-            if task['status'] in ('complete', 'error'):
-                return
-            
-            import time
-            time.sleep(0.3)
+    """Get download progress as JSON."""
+    task = download_tasks.get(task_id)
+    if not task:
+        return jsonify({'error': 'Task not found'}), 404
     
-    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+    return jsonify({
+        'progress': task['progress'],
+        'status': task['status'],
+        'error': task.get('error')
+    })
 
 @app.route('/file/<task_id>')
 def serve_file(task_id):
-    """Serve downloaded file and clean up."""
+    """Serve downloaded file."""
     task = download_tasks.get(task_id)
     if not task or not task.get('file_path'):
         return jsonify({'error': 'File not ready'}), 404
@@ -326,28 +339,7 @@ def serve_file(task_id):
     filename = task['filename']
     content_type = 'audio/mpeg' if task['is_audio'] else 'video/mp4'
     
-    def generate():
-        with open(file_path, 'rb') as f:
-            while True:
-                chunk = f.read(8192)
-                if not chunk:
-                    break
-                yield chunk
-        # Clean up temp file
-        try:
-            file_path.unlink()
-            download_tasks.pop(task_id, None)
-        except:
-            pass
-    
-    return Response(
-        stream_with_context(generate()),
-        mimetype=content_type,
-        headers={
-            'Content-Disposition': f'attachment; filename="{filename}"',
-            'Content-Length': str(file_path.stat().st_size)
-        }
-    )
+    return send_file(file_path, mimetype=content_type, as_attachment=True, download_name=filename)
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

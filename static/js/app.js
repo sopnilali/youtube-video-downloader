@@ -309,39 +309,61 @@ class YouTubeDownloader {
         }
 
         const taskId = startData.task_id;
+        const filename = startData.filename;
 
-        // Wait for progress via SSE
+        // Poll for progress
         return new Promise((resolve, reject) => {
-            const eventSource = new EventSource(`/progress/${taskId}`);
+            const poll = async () => {
+                try {
+                    const res = await fetch(`/progress/${taskId}`);
+                    const data = await res.json();
+                    console.log('Progress:', data);
 
-            eventSource.onmessage = (event) => {
-                const data = JSON.parse(event.data);
+                    if (data.error) {
+                        reject(new Error(data.error));
+                        return;
+                    }
 
-                if (data.error) {
-                    eventSource.close();
-                    reject(new Error(data.error));
-                    return;
-                }
+                    this.updateProgressBar(data.progress);
 
-                this.updateProgressBar(data.progress);
-
-                if (data.status === 'complete') {
-                    eventSource.close();
-                    resolve({
-                        success: true,
-                        filename: startData.filename,
-                        url: `/file/${taskId}`
-                    });
-                } else if (data.status === 'error') {
-                    eventSource.close();
-                    reject(new Error('Download failed'));
+                    if (data.status === 'complete') {
+                        console.log('Download complete, triggering file download...');
+                        // Trigger browser download
+                        const win = window.open(`/file/${taskId}`, '_blank');
+                        if (!win) {
+                            console.log('Popup blocked, using fallback');
+                            window.location.href = `/file/${taskId}`;
+                        }
+                        
+                        resolve({
+                            success: true,
+                            filename: filename,
+                            url: `/file/${taskId}`
+                        });
+                    } else if (data.status === 'error') {
+                        reject(new Error(data.error || 'Download failed'));
+                    } else {
+                        setTimeout(poll, 500);
+                    }
+                } catch (e) {
+                    console.error('Poll error:', e);
+                    reject(e);
                 }
             };
-
-            eventSource.onerror = () => {
-                eventSource.close();
-                reject(new Error('Connection lost'));
+            
+            poll();
+        });
+                    } else if (data.status === 'error') {
+                        reject(new Error(data.error || 'Download failed'));
+                    } else {
+                        setTimeout(poll, 500);
+                    }
+                } catch (e) {
+                    reject(e);
+                }
             };
+            
+            poll();
         });
     }
 
