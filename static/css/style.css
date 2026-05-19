@@ -496,34 +496,53 @@ button {
 .download-files {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
     margin-bottom: 24px;
 }
 
-.download-file-btn {
+.download-btn {
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 10px;
-    padding: 14px 24px;
-    background: var(--bg);
-    border: 1px solid var(--border);
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 24px;
+    background: linear-gradient(135deg, #2ea043 0%, #238636 100%);
+    border: none;
     border-radius: var(--radius-sm);
-    color: var(--text);
+    color: white;
     font-size: 14px;
     font-weight: 600;
     text-decoration: none;
     transition: var(--transition);
+    box-shadow: 0 4px 15px rgba(46, 160, 67, 0.3);
 }
 
-.download-file-btn:hover {
-    border-color: var(--success);
-    background: rgba(46, 160, 67, 0.1);
-    color: var(--success);
+.download-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 25px rgba(46, 160, 67, 0.4);
+    color: white;
 }
 
-.download-file-btn i {
+.download-btn:active {
+    transform: translateY(0);
+}
+
+.download-btn i:first-child {
+    font-size: 18px;
+    opacity: 0.9;
+}
+
+.download-btn span {
+    flex: 1;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.download-btn i:last-child {
     font-size: 16px;
+    opacity: 0.8;
 }
 
 .complete-actions {

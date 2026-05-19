@@ -232,7 +232,7 @@ class YouTubeDownloader {
 
         this.videoSection.classList.add('hidden');
         this.downloadProgress.classList.remove('hidden');
-        this.downloadFiles.innerHTML = '';
+        this.downloadComplete.classList.add('hidden');
         this.updateProgressBar(0);
 
         const downloads = [];
@@ -242,7 +242,7 @@ class YouTubeDownloader {
             if (this.downloadType === 'video' || this.downloadType === 'both') {
                 if (!this.selectedVideoQuality) throw new Error('No video quality selected');
                 
-                this.progressStatus.innerHTML = '<i class="fa-solid fa-video"></i> Downloading video...';
+                this.progressStatus.innerHTML = '<i class="fa-solid fa-video"></i> Processing video...';
                 const videoResult = await this.downloadWithProgress({
                     url: this.currentVideo.url,
                     quality: this.selectedVideoQuality.quality,
@@ -255,7 +255,7 @@ class YouTubeDownloader {
             if (this.downloadType === 'audio' || this.downloadType === 'both') {
                 if (!this.selectedAudioQuality) throw new Error('No audio quality selected');
                 
-                this.progressStatus.innerHTML = '<i class="fa-solid fa-music"></i> Downloading audio...';
+                this.progressStatus.innerHTML = '<i class="fa-solid fa-music"></i> Processing audio...';
                 this.updateProgressBar(0);
                 const audioResult = await this.downloadWithProgress({
                     url: this.currentVideo.url,
@@ -271,9 +271,10 @@ class YouTubeDownloader {
 
             // Render download buttons
             this.downloadFiles.innerHTML = downloads.map(d => `
-                <a href="${d.url}" class="download-file-btn" download="${d.filename}">
+                <a href="${d.url}" class="download-btn" download="${d.filename}">
                     <i class="fa-solid ${d.type === 'video' ? 'fa-video' : 'fa-music'}"></i>
                     <span>${d.type === 'video' ? 'Video' : 'Audio'} - ${d.filename}</span>
+                    <i class="fa-solid fa-download"></i>
                 </a>
             `).join('');
 
@@ -285,7 +286,7 @@ class YouTubeDownloader {
                 date: new Date().toISOString()
             });
 
-            this.showToast('Download complete!', false);
+            this.showToast('Processing complete! Click to download.', false);
             
         } catch (error) {
             this.showToast(error.message);
@@ -295,7 +296,6 @@ class YouTubeDownloader {
     }
 
     async downloadWithProgress(payload) {
-        // Start download
         const startResponse = await fetch('/download', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -311,13 +311,11 @@ class YouTubeDownloader {
         const taskId = startData.task_id;
         const filename = startData.filename;
 
-        // Poll for progress
         return new Promise((resolve, reject) => {
             const poll = async () => {
                 try {
                     const res = await fetch(`/progress/${taskId}`);
                     const data = await res.json();
-                    console.log('Progress:', data);
 
                     if (data.error) {
                         reject(new Error(data.error));
@@ -327,32 +325,11 @@ class YouTubeDownloader {
                     this.updateProgressBar(data.progress);
 
                     if (data.status === 'complete') {
-                        console.log('Download complete, triggering file download...');
-                        // Trigger browser download
-                        const win = window.open(`/file/${taskId}`, '_blank');
-                        if (!win) {
-                            console.log('Popup blocked, using fallback');
-                            window.location.href = `/file/${taskId}`;
-                        }
-                        
                         resolve({
                             success: true,
                             filename: filename,
                             url: `/file/${taskId}`
                         });
-                    } else if (data.status === 'error') {
-                        reject(new Error(data.error || 'Download failed'));
-                    } else {
-                        setTimeout(poll, 500);
-                    }
-                } catch (e) {
-                    console.error('Poll error:', e);
-                    reject(e);
-                }
-            };
-            
-            poll();
-        });
                     } else if (data.status === 'error') {
                         reject(new Error(data.error || 'Download failed'));
                     } else {
