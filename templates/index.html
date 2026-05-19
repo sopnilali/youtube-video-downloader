@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Downloader</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <i class="fa-brands fa-youtube"></i>
+                <h1>YouTube Downloader</h1>
+            </div>
+            <p class="subtitle">Download videos and audio in high quality</p>
+        </header>
+
+        <main>
+            <section class="input-section">
+                <div class="input-group">
+                    <input 
+                        type="text" 
+                        id="urlInput" 
+                        placeholder="Paste YouTube URL here..."
+                        autocomplete="off"
+                    >
+                    <button id="fetchBtn" class="btn-primary">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <span>Get Info</span>
+                    </button>
+                </div>
+                <p class="hint">Supports: youtube.com, youtu.be, shorts</p>
+            </section>
+
+            <section id="loadingSection" class="loading-section hidden">
+                <div class="spinner"></div>
+                <p>Fetching video information...</p>
+            </section>
+
+            <section id="videoSection" class="video-section hidden">
+                <div class="video-card">
+                    <div class="video-thumbnail">
+                        <img id="videoThumbnail" src="" alt="Video thumbnail">
+                        <span id="videoDuration" class="duration"></span>
+                    </div>
+                    <div class="video-info">
+                        <h2 id="videoTitle"></h2>
+                        <div class="meta">
+                            <span id="videoUploader"><i class="fa-solid fa-user"></i> <span></span></span>
+                            <span id="videoViews"><i class="fa-solid fa-eye"></i> <span></span></span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="formats-section">
+                    <h3>Select Quality</h3>
+                    <div id="formatsList" class="formats-list"></div>
+                </div>
+
+                <div class="actions">
+                    <button id="downloadBtn" class="btn-primary btn-large" disabled>
+                        <i class="fa-solid fa-download"></i>
+                        <span>Download</span>
+                    </button>
+                    <button id="newVideoBtn" class="btn-secondary btn-large">
+                        <i class="fa-solid fa-plus"></i>
+                        <span>New Video</span>
+                    </button>
+                </div>
+            </section>
+
+            <section id="downloadProgress" class="download-progress hidden">
+                <div class="progress-card">
+                    <div class="progress-header">
+                        <i class="fa-solid fa-circle-notch fa-spin"></i>
+                        <span>Downloading...</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                    <p class="progress-text">Please wait while we download your file</p>
+                </div>
+            </section>
+
+            <section id="downloadComplete" class="download-complete hidden">
+                <div class="complete-card">
+                    <div class="success-icon">
+                        <i class="fa-solid fa-circle-check"></i>
+                    </div>
+                    <h3>Download Complete!</h3>
+                    <p id="downloadedTitle"></p>
+                    <div class="complete-actions">
+                        <a id="downloadLink" href="#" class="btn-primary" download>
+                            <i class="fa-solid fa-download"></i>
+                            Save File
+                        </a>
+                        <button id="anotherBtn" class="btn-secondary">
+                            <i class="fa-solid fa-arrow-right"></i>
+                            Download Another
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <section id="historySection" class="history-section">
+                <div class="history-header">
+                    <h3><i class="fa-solid fa-clock-rotate-left"></i> Recent Downloads</h3>
+                    <button id="clearHistoryBtn" class="btn-text">
+                        <i class="fa-solid fa-trash"></i> Clear All
+                    </button>
+                </div>
+                <div id="historyList" class="history-list"></div>
+                <div id="emptyHistory" class="empty-history">
+                    <i class="fa-regular fa-folder-open"></i>
+                    <p>No downloads yet</p>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>Made for personal use. Respect copyright laws.</p>
+        </footer>
+    </div>
+
+    <div id="toast" class="toast hidden">
+        <i class="fa-solid fa-circle-exclamation"></i>
+        <span id="toastMessage"></span>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
