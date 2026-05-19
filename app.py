@@ -93,74 +93,51 @@ def get_info():
         
         info = json.loads(result.stdout.strip().split('\n')[0])
         
-        # Extract formats
-        formats = []
+        # Extract video formats (combined video+audio)
+        video_formats = []
+        seen_qualities = set()
         for fmt in info.get('formats', []):
             if fmt.get('vcodec') != 'none' and fmt.get('acodec') != 'none':
-                # Combined video+audio
-                quality = fmt.get('quality_label', fmt.get('format_note', 'unknown'))
-                if fmt.get('height'):
-                    quality = f"{fmt['height']}p"
-                formats.append({
-                    'format_id': fmt['format_id'],
-                    'quality': quality,
-                    'ext': fmt.get('ext', 'mp4'),
-                    'size': fmt.get('filesize_approx') or fmt.get('filesize') or 0,
-                    'type': 'video+audio'
-                })
+                height = fmt.get('height')
+                if height:
+                    quality = f"{height}p"
+                    if quality not in seen_qualities:
+                        seen_qualities.add(quality)
+                        video_formats.append({
+                            'format_id': fmt['format_id'],
+                            'quality': quality,
+                            'ext': fmt.get('ext', 'mp4'),
+                            'size': fmt.get('filesize_approx') or fmt.get('filesize') or 0,
+                        })
         
-        # Also add best audio-only options
+        # Sort video by quality descending
+        video_formats.sort(key=lambda f: int(f['quality'][:-1]) if f['quality'][:-1].isdigit() else 0, reverse=True)
+
+        # Extract audio-only formats
         audio_formats = []
         for fmt in info.get('formats', []):
             if fmt.get('vcodec') == 'none' and fmt.get('acodec') != 'none':
                 abr = fmt.get('abr', 0)
-                audio_formats.append({
-                    'format_id': fmt['format_id'],
-                    'quality': f"{int(abr)}kbps" if abr else 'audio',
-                    'ext': fmt.get('ext', 'm4a'),
-                    'size': fmt.get('filesize_approx') or fmt.get('filesize') or 0,
-                    'type': 'audio'
-                })
+                if abr > 0:
+                    audio_formats.append({
+                        'format_id': fmt['format_id'],
+                        'quality': f"{int(abr)}kbps",
+                        'ext': fmt.get('ext', 'm4a'),
+                        'size': fmt.get('filesize_approx') or fmt.get('filesize') or 0,
+                    })
         
-        # Get best audio format
-        best_audio = None
-        for af in sorted(audio_formats, key=lambda x: x.get('size', 0), reverse=True):
-            if af['ext'] in ('m4a', 'mp4'):
-                best_audio = af
-                break
-        if not best_audio and audio_formats:
-            best_audio = audio_formats[0]
+        # Sort audio by bitrate descending
+        audio_formats.sort(key=lambda f: int(f['quality'][:-4]) if f['quality'][:-4].isdigit() else 0, reverse=True)
         
-        # Filter video formats to avoid duplicates and get best ones
-        seen_qualities = set()
-        filtered_formats = []
-        for fmt in sorted(formats, key=lambda x: x.get('size', 0), reverse=True):
-            if fmt['quality'] not in seen_qualities and fmt['quality'] not in ('unknown', '') and fmt['size'] > 0:
-                seen_qualities.add(fmt['quality'])
-                filtered_formats.append(fmt)
-        
-        # Sort by quality (height)
-        def quality_sort_key(f):
-            q = f['quality']
-            if q.endswith('p'):
-                try:
-                    return int(q[:-1])
-                except:
-                    return 0
-            return 0
-        
-        filtered_formats.sort(key=quality_sort_key, reverse=True)
-        
-        # Add audio-only option
-        if best_audio:
-            filtered_formats.insert(0, {
-                'format_id': best_audio['format_id'],
-                'quality': 'Audio Only (MP3)',
-                'ext': 'mp3',
-                'size': best_audio['size'],
-                'type': 'audio'
-            })
-        
+        # Deduplicate audio
+        seen_audio = set()
+        unique_audio = []
+        for af in audio_formats:
+            if af['quality'] not in seen_audio:
+                seen_audio.add(af['quality'])
+                unique_audio.append(af)
+        audio_formats = unique_audio
+
         return jsonify({
             'success': True,
             'id': info.get('id'),
@@ -169,7 +146,8 @@ def get_info():
             'duration': info.get('duration'),
             'uploader': info.get('uploader'),
             'view_count': info.get('view_count'),
-            'formats': filtered_formats
+            'video_formats': video_formats,
+            'audio_formats': audio_formats
         })
         
     except subprocess.TimeoutExpired:
@@ -215,10 +193,10 @@ def download():
         title = clean_filename(info.get('title', 'video'))
         video_id = info.get('id', 'unknown')
         
-        # Determine output file
+        # Determine output file and format
         if is_audio:
             output_file = DOWNLOAD_DIR / f"{title}_{video_id}.mp3"
-            format_spec = '18'
+            format_spec = f"{format_id}/bestaudio"
         else:
             output_file = DOWNLOAD_DIR / f"{title}_{video_id}.mp4"
             format_spec = f"{format_id}/best[height<=1080]"

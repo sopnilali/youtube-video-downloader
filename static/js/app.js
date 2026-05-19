@@ -1,7 +1,11 @@
 class YouTubeDownloader {
     constructor() {
         this.currentVideo = null;
-        this.selectedFormat = null;
+        this.downloadType = 'video';
+        this.selectedVideoQuality = null;
+        this.selectedAudioQuality = null;
+        this.videoFormats = [];
+        this.audioFormats = [];
         this.downloads = JSON.parse(localStorage.getItem('yt_downloads') || '[]');
         this.init();
     }
@@ -22,13 +26,18 @@ class YouTubeDownloader {
         this.videoTitle = document.getElementById('videoTitle');
         this.videoUploader = document.getElementById('videoUploader');
         this.videoViews = document.getElementById('videoViews');
-        this.formatsList = document.getElementById('formatsList');
+        this.typeButtons = document.querySelectorAll('.type-btn');
+        this.videoQualityGroup = document.getElementById('videoQualityGroup');
+        this.audioQualityGroup = document.getElementById('audioQualityGroup');
+        this.videoQualities = document.getElementById('videoQualities');
+        this.audioQualities = document.getElementById('audioQualities');
         this.downloadBtn = document.getElementById('downloadBtn');
         this.newVideoBtn = document.getElementById('newVideoBtn');
         this.downloadProgress = document.getElementById('downloadProgress');
+        this.progressStatus = document.getElementById('progressStatus');
         this.downloadComplete = document.getElementById('downloadComplete');
         this.downloadedTitle = document.getElementById('downloadedTitle');
-        this.downloadLink = document.getElementById('downloadLink');
+        this.downloadFiles = document.getElementById('downloadFiles');
         this.anotherBtn = document.getElementById('anotherBtn');
         this.historyList = document.getElementById('historyList');
         this.emptyHistory = document.getElementById('emptyHistory');
@@ -46,6 +55,16 @@ class YouTubeDownloader {
         this.newVideoBtn.addEventListener('click', () => this.reset());
         this.anotherBtn.addEventListener('click', () => this.reset());
         this.clearHistoryBtn.addEventListener('click', () => this.clearHistory());
+
+        this.typeButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.typeButtons.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this.downloadType = btn.dataset.type;
+                this.updateQualityVisibility();
+                this.updateDownloadButton();
+            });
+        });
     }
 
     showToast(message, isError = true) {
@@ -107,81 +126,166 @@ class YouTubeDownloader {
         this.videoUploader.querySelector('span').textContent = data.uploader || 'Unknown';
         this.videoViews.querySelector('span').textContent = this.formatViews(data.view_count);
 
-        this.renderFormats(data.formats);
-        
-        // Select first format by default
-        if (data.formats && data.formats.length > 0) {
-            this.selectFormat(data.formats[0]);
+        this.videoFormats = data.video_formats || [];
+        this.audioFormats = data.audio_formats || [];
+
+        this.renderQualityChips();
+        this.updateQualityVisibility();
+        this.updateDownloadButton();
+    }
+
+    renderQualityChips() {
+        // Video quality chips
+        this.videoQualities.innerHTML = this.videoFormats.map((fmt, i) => `
+            <button class="quality-chip ${i === 0 ? 'selected' : ''}" 
+                    data-group="video" 
+                    data-format-id="${fmt.format_id}"
+                    data-quality="${fmt.quality}">
+                ${fmt.quality}
+            </button>
+        `).join('');
+
+        // Audio quality chips
+        this.audioQualities.innerHTML = this.audioFormats.map((fmt, i) => `
+            <button class="quality-chip ${i === 0 ? 'selected' : ''}" 
+                    data-group="audio" 
+                    data-format-id="${fmt.format_id}"
+                    data-quality="${fmt.quality}">
+                ${fmt.quality}
+            </button>
+        `).join('');
+
+        // Bind video chip clicks
+        this.videoQualities.querySelectorAll('.quality-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                this.videoQualities.querySelectorAll('.quality-chip').forEach(c => c.classList.remove('selected'));
+                chip.classList.add('selected');
+                this.selectedVideoQuality = {
+                    format_id: chip.dataset.formatId,
+                    quality: chip.dataset.quality
+                };
+                this.updateDownloadButton();
+            });
+        });
+
+        // Bind audio chip clicks
+        this.audioQualities.querySelectorAll('.quality-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                this.audioQualities.querySelectorAll('.quality-chip').forEach(c => c.classList.remove('selected'));
+                chip.classList.add('selected');
+                this.selectedAudioQuality = {
+                    format_id: chip.dataset.formatId,
+                    quality: chip.dataset.quality
+                };
+                this.updateDownloadButton();
+            });
+        });
+
+        // Set defaults
+        if (this.videoFormats.length > 0) {
+            this.selectedVideoQuality = {
+                format_id: this.videoFormats[0].format_id,
+                quality: this.videoFormats[0].quality
+            };
+        }
+        if (this.audioFormats.length > 0) {
+            this.selectedAudioQuality = {
+                format_id: this.audioFormats[0].format_id,
+                quality: this.audioFormats[0].quality
+            };
         }
     }
 
-    renderFormats(formats) {
-        this.formatsList.innerHTML = formats.map((fmt, index) => `
-            <div class="format-item ${index === 0 ? 'selected' : ''}" data-format-id="${fmt.format_id}" data-is-audio="${fmt.type === 'audio'}">
-                <div class="format-info">
-                    <div class="format-radio"></div>
-                    <span class="format-quality">${fmt.quality}</span>
-                    <span class="format-type">${fmt.type}</span>
-                </div>
-                <span class="format-size">${this.formatSize(fmt.size)}</span>
-            </div>
-        `).join('');
-
-        this.formatsList.querySelectorAll('.format-item').forEach(item => {
-            item.addEventListener('click', () => {
-                const formatId = item.dataset.formatId;
-                const isAudio = item.dataset.isAudio === 'true';
-                const format = formats.find(f => f.format_id === formatId);
-                if (format) this.selectFormat(format);
-            });
-        });
+    updateQualityVisibility() {
+        if (this.downloadType === 'video') {
+            this.videoQualityGroup.classList.remove('hidden');
+            this.audioQualityGroup.classList.add('hidden');
+        } else if (this.downloadType === 'audio') {
+            this.videoQualityGroup.classList.add('hidden');
+            this.audioQualityGroup.classList.remove('hidden');
+        } else {
+            this.videoQualityGroup.classList.remove('hidden');
+            this.audioQualityGroup.classList.remove('hidden');
+        }
     }
 
-    selectFormat(format) {
-        this.selectedFormat = format;
+    updateDownloadButton() {
+        let canDownload = false;
         
-        this.formatsList.querySelectorAll('.format-item').forEach(item => {
-            item.classList.toggle('selected', item.dataset.formatId === format.format_id);
-        });
+        if (this.downloadType === 'video') {
+            canDownload = !!this.selectedVideoQuality;
+        } else if (this.downloadType === 'audio') {
+            canDownload = !!this.selectedAudioQuality;
+        } else {
+            canDownload = !!this.selectedVideoQuality && !!this.selectedAudioQuality;
+        }
         
-        this.downloadBtn.disabled = false;
+        this.downloadBtn.disabled = !canDownload;
+
+        // Update button icon based on type
+        const icon = this.downloadBtn.querySelector('i');
+        if (this.downloadType === 'both') {
+            icon.className = 'fa-solid fa-layer-group';
+        } else if (this.downloadType === 'audio') {
+            icon.className = 'fa-solid fa-music';
+        } else {
+            icon.className = 'fa-solid fa-download';
+        }
     }
 
     async startDownload() {
-        if (!this.currentVideo || !this.selectedFormat) return;
+        if (!this.currentVideo) return;
 
         this.videoSection.classList.add('hidden');
         this.downloadProgress.classList.remove('hidden');
+        this.downloadFiles.innerHTML = '';
+
+        const downloads = [];
 
         try {
-            const response = await fetch('/download', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+            // Download video if needed
+            if (this.downloadType === 'video' || this.downloadType === 'both') {
+                if (!this.selectedVideoQuality) throw new Error('No video quality selected');
+                
+                this.progressStatus.textContent = 'Downloading video...';
+                const videoResult = await this.downloadFile({
                     url: this.currentVideo.url,
-                    format_id: this.selectedFormat.format_id,
-                    is_audio: this.selectedFormat.type === 'audio'
-                })
-            });
+                    format_id: this.selectedVideoQuality.format_id,
+                    is_audio: false
+                });
+                downloads.push({ ...videoResult, type: 'video' });
+            }
 
-            const data = await response.json();
-
-            if (!data.success) {
-                throw new Error(data.error || 'Download failed');
+            // Download audio if needed
+            if (this.downloadType === 'audio' || this.downloadType === 'both') {
+                if (!this.selectedAudioQuality) throw new Error('No audio quality selected');
+                
+                this.progressStatus.textContent = 'Downloading audio...';
+                const audioResult = await this.downloadFile({
+                    url: this.currentVideo.url,
+                    format_id: this.selectedAudioQuality.format_id,
+                    is_audio: true
+                });
+                downloads.push({ ...audioResult, type: 'audio' });
             }
 
             this.downloadProgress.classList.add('hidden');
             this.downloadComplete.classList.remove('hidden');
-            this.downloadedTitle.textContent = data.title;
-            this.downloadLink.href = data.download_url;
-            this.downloadLink.download = data.filename;
+            this.downloadedTitle.textContent = this.currentVideo.title;
+
+            // Render download buttons
+            this.downloadFiles.innerHTML = downloads.map(d => `
+                <a href="${d.download_url}" class="download-file-btn" download="${d.filename}">
+                    <i class="fa-solid ${d.type === 'video' ? 'fa-video' : 'fa-music'}"></i>
+                    <span>${d.type === 'video' ? 'Video' : 'Audio'} - ${d.filename}</span>
+                </a>
+            `).join('');
 
             // Add to history
             this.addToHistory({
-                title: data.title,
+                title: this.currentVideo.title,
                 thumbnail: this.currentVideo.thumbnail,
-                filename: data.filename,
-                download_url: data.download_url,
+                files: downloads.map(d => ({ filename: d.filename, download_url: d.download_url, type: d.type })),
                 date: new Date().toISOString()
             });
 
@@ -192,6 +296,22 @@ class YouTubeDownloader {
             this.downloadProgress.classList.add('hidden');
             this.videoSection.classList.remove('hidden');
         }
+    }
+
+    async downloadFile(payload) {
+        const response = await fetch('/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+
+        if (!data.success) {
+            throw new Error(data.error || 'Download failed');
+        }
+
+        return data;
     }
 
     addToHistory(item) {
@@ -214,20 +334,25 @@ class YouTubeDownloader {
             return;
         }
 
-        this.historyList.innerHTML = this.downloads.map(item => `
-            <div class="history-item">
-                <img src="${item.thumbnail}" alt="" class="history-thumb" onerror="this.style.display='none'">
-                <div class="history-details">
-                    <div class="history-title">${item.title}</div>
-                    <div class="history-meta">${this.timeAgo(item.date)}</div>
+        this.historyList.innerHTML = this.downloads.map(item => {
+            const files = item.files || [{ filename: item.filename, download_url: item.download_url, type: 'video' }];
+            return `
+                <div class="history-item">
+                    <img src="${item.thumbnail}" alt="" class="history-thumb" onerror="this.style.display='none'">
+                    <div class="history-details">
+                        <div class="history-title">${item.title}</div>
+                        <div class="history-meta">${files.map(f => f.type).join(' + ')} • ${this.timeAgo(item.date)}</div>
+                    </div>
+                    <div class="history-actions">
+                        ${files.map(f => `
+                            <a href="${f.download_url}" download="${f.filename}" title="Download ${f.type}">
+                                <i class="fa-solid fa-${f.type === 'audio' ? 'music' : 'download'}"></i>
+                            </a>
+                        `).join('')}
+                    </div>
                 </div>
-                <div class="history-actions">
-                    <a href="${item.download_url}" download="${item.filename}" title="Download again">
-                        <i class="fa-solid fa-download"></i>
-                    </a>
-                </div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
     }
 
     clearHistory() {
@@ -239,7 +364,8 @@ class YouTubeDownloader {
     reset() {
         this.urlInput.value = '';
         this.currentVideo = null;
-        this.selectedFormat = null;
+        this.selectedVideoQuality = null;
+        this.selectedAudioQuality = null;
         this.downloadBtn.disabled = true;
         
         this.videoSection.classList.add('hidden');
@@ -269,13 +395,6 @@ class YouTubeDownloader {
         return `${views} views`;
     }
 
-    formatSize(bytes) {
-        if (!bytes || bytes === 0) return 'Unknown';
-        const sizes = ['B', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(1024));
-        return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${sizes[i]}`;
-    }
-
     timeAgo(dateString) {
         const date = new Date(dateString);
         const seconds = Math.floor((new Date() - date) / 1000);
@@ -290,7 +409,6 @@ class YouTubeDownloader {
     }
 }
 
-// Initialize app
 document.addEventListener('DOMContentLoaded', () => {
     new YouTubeDownloader();
 });

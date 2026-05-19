@@ -55,9 +55,37 @@
                     </div>
                 </div>
 
-                <div class="formats-section">
-                    <h3>Select Quality</h3>
-                    <div id="formatsList" class="formats-list"></div>
+                <div class="download-options">
+                    <h3><i class="fa-solid fa-sliders"></i> Download Options</h3>
+                    
+                    <div class="type-selector">
+                        <button class="type-btn active" data-type="video">
+                            <i class="fa-solid fa-video"></i>
+                            <span>Video</span>
+                        </button>
+                        <button class="type-btn" data-type="audio">
+                            <i class="fa-solid fa-music"></i>
+                            <span>Audio</span>
+                        </button>
+                        <button class="type-btn" data-type="both">
+                            <i class="fa-solid fa-layer-group"></i>
+                            <span>Both</span>
+                        </button>
+                    </div>
+
+                    <div id="videoQualityGroup" class="quality-group">
+                        <label class="quality-label">
+                            <i class="fa-solid fa-video"></i> Video Quality
+                        </label>
+                        <div id="videoQualities" class="quality-chips"></div>
+                    </div>
+
+                    <div id="audioQualityGroup" class="quality-group hidden">
+                        <label class="quality-label">
+                            <i class="fa-solid fa-music"></i> Audio Quality
+                        </label>
+                        <div id="audioQualities" class="quality-chips"></div>
+                    </div>
                 </div>
 
                 <div class="actions">
@@ -76,7 +104,7 @@
                 <div class="progress-card">
                     <div class="progress-header">
                         <i class="fa-solid fa-circle-notch fa-spin"></i>
-                        <span>Downloading...</span>
+                        <span id="progressStatus">Downloading...</span>
                     </div>
                     <div class="progress-bar">
                         <div class="progress-fill"></div>
@@ -92,11 +120,8 @@
                     </div>
                     <h3>Download Complete!</h3>
                     <p id="downloadedTitle"></p>
+                    <div id="downloadFiles" class="download-files"></div>
                     <div class="complete-actions">
-                        <a id="downloadLink" href="#" class="btn-primary" download>
-                            <i class="fa-solid fa-download"></i>
-                            Save File
-                        </a>
                         <button id="anotherBtn" class="btn-secondary">
                             <i class="fa-solid fa-arrow-right"></i>
                             Download Another
