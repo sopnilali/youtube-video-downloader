@@ -139,7 +139,6 @@ class YouTubeDownloader {
         this.videoQualities.innerHTML = this.videoFormats.map((fmt, i) => `
             <button class="quality-chip ${i === 0 ? 'selected' : ''}" 
                     data-group="video" 
-                    data-format-id="${fmt.format_id}"
                     data-quality="${fmt.quality}">
                 ${fmt.quality}
             </button>
@@ -149,7 +148,6 @@ class YouTubeDownloader {
         this.audioQualities.innerHTML = this.audioFormats.map((fmt, i) => `
             <button class="quality-chip ${i === 0 ? 'selected' : ''}" 
                     data-group="audio" 
-                    data-format-id="${fmt.format_id}"
                     data-quality="${fmt.quality}">
                 ${fmt.quality}
             </button>
@@ -161,7 +159,6 @@ class YouTubeDownloader {
                 this.videoQualities.querySelectorAll('.quality-chip').forEach(c => c.classList.remove('selected'));
                 chip.classList.add('selected');
                 this.selectedVideoQuality = {
-                    format_id: chip.dataset.formatId,
                     quality: chip.dataset.quality
                 };
                 this.updateDownloadButton();
@@ -174,7 +171,6 @@ class YouTubeDownloader {
                 this.audioQualities.querySelectorAll('.quality-chip').forEach(c => c.classList.remove('selected'));
                 chip.classList.add('selected');
                 this.selectedAudioQuality = {
-                    format_id: chip.dataset.formatId,
                     quality: chip.dataset.quality
                 };
                 this.updateDownloadButton();
@@ -184,13 +180,11 @@ class YouTubeDownloader {
         // Set defaults
         if (this.videoFormats.length > 0) {
             this.selectedVideoQuality = {
-                format_id: this.videoFormats[0].format_id,
                 quality: this.videoFormats[0].quality
             };
         }
         if (this.audioFormats.length > 0) {
             this.selectedAudioQuality = {
-                format_id: this.audioFormats[0].format_id,
                 quality: this.audioFormats[0].quality
             };
         }
@@ -250,7 +244,7 @@ class YouTubeDownloader {
                 this.progressStatus.textContent = 'Downloading video...';
                 const videoResult = await this.downloadFile({
                     url: this.currentVideo.url,
-                    format_id: this.selectedVideoQuality.format_id,
+                    quality: this.selectedVideoQuality.quality,
                     is_audio: false
                 });
                 downloads.push({ ...videoResult, type: 'video' });
@@ -263,7 +257,7 @@ class YouTubeDownloader {
                 this.progressStatus.textContent = 'Downloading audio...';
                 const audioResult = await this.downloadFile({
                     url: this.currentVideo.url,
-                    format_id: this.selectedAudioQuality.format_id,
+                    quality: this.selectedAudioQuality.quality,
                     is_audio: true
                 });
                 downloads.push({ ...audioResult, type: 'audio' });

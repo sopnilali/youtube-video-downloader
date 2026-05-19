@@ -68,13 +68,13 @@ def get_info():
         return jsonify({'error': 'Invalid YouTube URL'}), 400
     
     try:
-        # Use yt-dlp to get video info
+        # Use web client for info to get more formats
         cmd = [
             YT_DLP_CMD, *YT_DLP_ARGS,
             '--dump-json',
             '--no-download',
             '--no-warnings',
-            '--extractor-args', 'youtube:player_client=android',
+            '--extractor-args', 'youtube:player_client=web',
             '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             url
         ]
@@ -93,50 +93,17 @@ def get_info():
         
         info = json.loads(result.stdout.strip().split('\n')[0])
         
-        # Extract video formats (combined video+audio)
-        video_formats = []
-        seen_qualities = set()
-        for fmt in info.get('formats', []):
-            if fmt.get('vcodec') != 'none' and fmt.get('acodec') != 'none':
-                height = fmt.get('height')
-                if height:
-                    quality = f"{height}p"
-                    if quality not in seen_qualities:
-                        seen_qualities.add(quality)
-                        video_formats.append({
-                            'format_id': fmt['format_id'],
-                            'quality': quality,
-                            'ext': fmt.get('ext', 'mp4'),
-                            'size': fmt.get('filesize_approx') or fmt.get('filesize') or 0,
-                        })
+        # Build video quality options (720p, 1080p)
+        video_formats = [
+            {'format_id': '720p', 'quality': '720p', 'ext': 'mp4', 'size': 0},
+            {'format_id': '1080p', 'quality': '1080p', 'ext': 'mp4', 'size': 0},
+        ]
         
-        # Sort video by quality descending
-        video_formats.sort(key=lambda f: int(f['quality'][:-1]) if f['quality'][:-1].isdigit() else 0, reverse=True)
-
-        # Extract audio-only formats
-        audio_formats = []
-        for fmt in info.get('formats', []):
-            if fmt.get('vcodec') == 'none' and fmt.get('acodec') != 'none':
-                abr = fmt.get('abr', 0)
-                if abr > 0:
-                    audio_formats.append({
-                        'format_id': fmt['format_id'],
-                        'quality': f"{int(abr)}kbps",
-                        'ext': fmt.get('ext', 'm4a'),
-                        'size': fmt.get('filesize_approx') or fmt.get('filesize') or 0,
-                    })
-        
-        # Sort audio by bitrate descending
-        audio_formats.sort(key=lambda f: int(f['quality'][:-4]) if f['quality'][:-4].isdigit() else 0, reverse=True)
-        
-        # Deduplicate audio
-        seen_audio = set()
-        unique_audio = []
-        for af in audio_formats:
-            if af['quality'] not in seen_audio:
-                seen_audio.add(af['quality'])
-                unique_audio.append(af)
-        audio_formats = unique_audio
+        # Build audio quality options (128kbps, 192kbps)
+        audio_formats = [
+            {'format_id': '128kbps', 'quality': '128kbps', 'ext': 'mp3', 'size': 0},
+            {'format_id': '192kbps', 'quality': '192kbps', 'ext': 'mp3', 'size': 0},
+        ]
 
         return jsonify({
             'success': True,
@@ -160,11 +127,11 @@ def download():
     """Download video using yt-dlp."""
     data = request.get_json()
     url = data.get('url', '').strip()
-    format_id = data.get('format_id', '')
+    quality = data.get('quality', '')
     is_audio = data.get('is_audio', False)
     
-    if not url or not format_id:
-        return jsonify({'error': 'Missing URL or format'}), 400
+    if not url or not quality:
+        return jsonify({'error': 'Missing URL or quality'}), 400
     
     try:
         # Get video info first for filename
@@ -193,13 +160,16 @@ def download():
         title = clean_filename(info.get('title', 'video'))
         video_id = info.get('id', 'unknown')
         
-        # Determine output file and format
+        # Determine output file and format spec
         if is_audio:
             output_file = DOWNLOAD_DIR / f"{title}_{video_id}.mp3"
-            format_spec = f"{format_id}/bestaudio"
+            format_spec = 'best'
+            audio_quality = quality  # 128kbps or 192kbps
         else:
             output_file = DOWNLOAD_DIR / f"{title}_{video_id}.mp4"
-            format_spec = f"{format_id}/best[height<=1080]"
+            height = quality.replace('p', '')
+            format_spec = f"bestvideo[height<={height}]+bestaudio/best[height<={height}]"
+            audio_quality = None
         
         output_template = str(DOWNLOAD_DIR / f"{title}_{video_id}")
         
@@ -218,10 +188,9 @@ def download():
             cmd.extend([
                 '--extract-audio',
                 '--audio-format', 'mp3',
-                '--audio-quality', '192K',
+                '--audio-quality', audio_quality.replace('kbps', 'K'),
             ])
         else:
-            # For video, prefer mp4
             cmd.extend([
                 '--merge-output-format', 'mp4',
             ])
@@ -246,7 +215,6 @@ def download():
         if is_audio:
             downloaded_file = DOWNLOAD_DIR / f"{title}_{video_id}.mp3"
             if not downloaded_file.exists():
-                # Try other extensions
                 for ext in ['m4a', 'webm', 'opus']:
                     alt = DOWNLOAD_DIR / f"{title}_{video_id}.{ext}"
                     if alt.exists():
