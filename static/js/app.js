@@ -269,7 +269,7 @@ class YouTubeDownloader {
 
             // Render download buttons
             this.downloadFiles.innerHTML = downloads.map(d => `
-                <a href="${d.download_url}" class="download-file-btn" download="${d.filename}">
+                <a href="${d.url}" class="download-file-btn" download="${d.filename}">
                     <i class="fa-solid ${d.type === 'video' ? 'fa-video' : 'fa-music'}"></i>
                     <span>${d.type === 'video' ? 'Video' : 'Audio'} - ${d.filename}</span>
                 </a>
@@ -279,7 +279,7 @@ class YouTubeDownloader {
             this.addToHistory({
                 title: this.currentVideo.title,
                 thumbnail: this.currentVideo.thumbnail,
-                files: downloads.map(d => ({ filename: d.filename, download_url: d.download_url, type: d.type })),
+                files: downloads.map(d => ({ filename: d.filename, url: d.url, type: d.type })),
                 date: new Date().toISOString()
             });
 
@@ -299,13 +299,31 @@ class YouTubeDownloader {
             body: JSON.stringify(payload)
         });
 
-        const data = await response.json();
-
-        if (!data.success) {
+        if (!response.ok) {
+            const data = await response.json();
             throw new Error(data.error || 'Download failed');
         }
 
-        return data;
+        // Get filename from content-disposition header
+        const disposition = response.headers.get('Content-Disposition');
+        const filename = disposition 
+            ? disposition.split('filename="')[1]?.replace('"', '') 
+            : 'download';
+
+        // Create blob and trigger download
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        
+        // Auto-trigger download
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        return { filename, url, success: true };
     }
 
     addToHistory(item) {
@@ -329,7 +347,7 @@ class YouTubeDownloader {
         }
 
         this.historyList.innerHTML = this.downloads.map(item => {
-            const files = item.files || [{ filename: item.filename, download_url: item.download_url, type: 'video' }];
+            const files = item.files || [{ filename: item.filename, url: item.download_url, type: 'video' }];
             return `
                 <div class="history-item">
                     <img src="${item.thumbnail}" alt="" class="history-thumb" onerror="this.style.display='none'">
@@ -339,7 +357,7 @@ class YouTubeDownloader {
                     </div>
                     <div class="history-actions">
                         ${files.map(f => `
-                            <a href="${f.download_url}" download="${f.filename}" title="Download ${f.type}">
+                            <a href="${f.url}" download="${f.filename}" title="Download ${f.type}">
                                 <i class="fa-solid fa-${f.type === 'audio' ? 'music' : 'download'}"></i>
                             </a>
                         `).join('')}

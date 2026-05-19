@@ -6,7 +6,7 @@ import subprocess
 import shutil
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, Response
 
 app = Flask(__name__)
 
@@ -124,7 +124,7 @@ def get_info():
 
 @app.route('/download', methods=['POST'])
 def download():
-    """Download video using yt-dlp."""
+    """Stream download directly to browser without storing."""
     data = request.get_json()
     url = data.get('url', '').strip()
     quality = data.get('quality', '')
@@ -160,24 +160,24 @@ def download():
         title = clean_filename(info.get('title', 'video'))
         video_id = info.get('id', 'unknown')
         
-        # Determine output file and format spec
+        # Determine format spec and output
         if is_audio:
-            output_file = DOWNLOAD_DIR / f"{title}_{video_id}.mp3"
+            filename = f"{title}_{video_id}.mp3"
             format_spec = 'best'
-            audio_quality = quality  # 128kbps or 192kbps
+            audio_quality = quality
+            output_template = f"/tmp/{video_id}.%(ext)s"
         else:
-            output_file = DOWNLOAD_DIR / f"{title}_{video_id}.mp4"
+            filename = f"{title}_{video_id}.mp4"
             height = quality.replace('p', '')
             format_spec = f"bestvideo[height<={height}]+bestaudio/best[height<={height}]"
             audio_quality = None
-        
-        output_template = str(DOWNLOAD_DIR / f"{title}_{video_id}")
+            output_template = f"/tmp/{video_id}.%(ext)s"
         
         # Build download command
         cmd = [
             YT_DLP_CMD, *YT_DLP_ARGS,
             '-f', format_spec,
-            '-o', output_template + '.%(ext)s',
+            '-o', output_template,
             '--no-playlist',
             '--no-warnings',
             '--extractor-args', 'youtube:player_client=android',
@@ -202,7 +202,6 @@ def download():
         
         if result.returncode != 0:
             stderr = result.stderr.strip()
-            # Filter out deprecation warnings
             stderr_lines = [line for line in stderr.split('\n') if 'Deprecated' not in line and 'deprecated' not in line]
             clean_error = '\n'.join(stderr_lines)
             
@@ -211,60 +210,54 @@ def download():
             
             return jsonify({'error': f'Download failed: {clean_error}'}), 500
         
-        # Find downloaded file
+        # Find the downloaded file
         if is_audio:
-            downloaded_file = DOWNLOAD_DIR / f"{title}_{video_id}.mp3"
+            downloaded_file = Path(f"/tmp/{video_id}.mp3")
             if not downloaded_file.exists():
                 for ext in ['m4a', 'webm', 'opus']:
-                    alt = DOWNLOAD_DIR / f"{title}_{video_id}.{ext}"
+                    alt = Path(f"/tmp/{video_id}.{ext}")
                     if alt.exists():
                         downloaded_file = alt
                         break
         else:
-            downloaded_file = DOWNLOAD_DIR / f"{title}_{video_id}.mp4"
+            downloaded_file = Path(f"/tmp/{video_id}.mp4")
             if not downloaded_file.exists():
                 for ext in ['webm', 'mkv']:
-                    alt = DOWNLOAD_DIR / f"{title}_{video_id}.{ext}"
+                    alt = Path(f"/tmp/{video_id}.{ext}")
                     if alt.exists():
                         downloaded_file = alt
                         break
         
         if not downloaded_file.exists():
-            # Search for any file matching pattern
-            files = list(DOWNLOAD_DIR.glob(f"{title}_{video_id}*"))
-            if files:
-                downloaded_file = files[0]
-            else:
-                return jsonify({'error': 'Download completed but file not found'}), 500
+            return jsonify({'error': 'Download completed but file not found'}), 500
         
-        return jsonify({
-            'success': True,
-            'filename': downloaded_file.name,
-            'title': info.get('title'),
-            'download_url': f'/file/{downloaded_file.name}'
-        })
+        # Stream file to browser and delete after
+        def generate():
+            with open(downloaded_file, 'rb') as f:
+                while True:
+                    chunk = f.read(8192)
+                    if not chunk:
+                        break
+                    yield chunk
+            # Clean up temp file after sending
+            try:
+                downloaded_file.unlink()
+            except:
+                pass
+        
+        content_type = 'audio/mpeg' if is_audio else 'video/mp4'
+        
+        return Response(
+            generate(),
+            mimetype=content_type,
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"',
+                'Content-Length': str(downloaded_file.stat().st_size)
+            }
+        )
         
     except subprocess.TimeoutExpired:
         return jsonify({'error': 'Download timed out. The video may be too large.'}), 504
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/file/<filename>')
-def serve_file(filename):
-    """Serve downloaded file."""
-    file_path = DOWNLOAD_DIR / filename
-    if not file_path.exists():
-        return jsonify({'error': 'File not found'}), 404
-    return send_file(file_path, as_attachment=True)
-
-@app.route('/clear', methods=['POST'])
-def clear_downloads():
-    """Clear all downloaded files."""
-    try:
-        for f in DOWNLOAD_DIR.glob('*'):
-            if f.is_file():
-                f.unlink()
-        return jsonify({'success': True})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
