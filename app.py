@@ -3,6 +3,7 @@ import sys
 import re
 import json
 import subprocess
+import shutil
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from flask import Flask, render_template, request, jsonify, send_file
@@ -10,8 +11,17 @@ from flask import Flask, render_template, request, jsonify, send_file
 app = Flask(__name__)
 
 # Downloads directory
-DOWNLOAD_DIR = Path(__file__).parent / "downloads"
+DOWNLOAD_DIR = Path(os.environ.get('DOWNLOAD_DIR', str(Path(__file__).parent / "downloads")))
 DOWNLOAD_DIR.mkdir(exist_ok=True)
+
+# Find yt-dlp executable
+YT_DLP_CMD = shutil.which('yt-dlp') or shutil.which('yt-dlp.exe')
+if not YT_DLP_CMD:
+    # Fallback to module execution
+    YT_DLP_CMD = sys.executable
+    YT_DLP_ARGS = ['-m', 'yt_dlp']
+else:
+    YT_DLP_ARGS = []
 
 def clean_filename(title):
     """Clean filename for saving."""
@@ -60,7 +70,7 @@ def get_info():
     try:
         # Use yt-dlp to get video info
         cmd = [
-            sys.executable, '-m', 'yt_dlp',
+            YT_DLP_CMD, *YT_DLP_ARGS,
             '--dump-json',
             '--no-download',
             '--no-warnings',
@@ -181,7 +191,7 @@ def download():
     try:
         # Get video info first for filename
         cmd_info = [
-            sys.executable, '-m', 'yt_dlp',
+            YT_DLP_CMD, *YT_DLP_ARGS,
             '--dump-json',
             '--no-download',
             '--no-warnings',
@@ -217,7 +227,7 @@ def download():
         
         # Build download command
         cmd = [
-            sys.executable, '-m', 'yt_dlp',
+            YT_DLP_CMD, *YT_DLP_ARGS,
             '-f', format_spec,
             '-o', output_template + '.%(ext)s',
             '--no-playlist',
